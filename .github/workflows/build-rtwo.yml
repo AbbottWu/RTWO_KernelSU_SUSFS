@@ -1,0 +1,164 @@
+name: Build Moto rtwo WildKernel
+
+permissions:
+  contents: read
+
+env:
+  KERNEL_REPO: https://github.com/LineageOS/android_kernel_motorola_sm8550.git
+  KERNEL_BRANCH: lineage-23.2
+  ANDROID_VERSION: android13
+  KERNEL_VERSION: "5.15"
+  WILDKERNEL_VERSION: android13-5.15
+  OUT_DIR: /home/runner/out
+  IMAGE_NAME: Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      feature_set:
+        description: "Feature Set"
+        type: choice
+        options:
+          - KSUN+SUSFS
+          - KSUN
+          - SUSFS
+          - NONE
+        default: KSUN+SUSFS
+      ksu_branch:
+        description: "KernelSU branch or commit (empty = latest dev-susfs branch tip)"
+        type: string
+        required: false
+        default: ""
+      susfs_commit:
+        description: "SUSFS commit for android13-5.15 (empty = latest branch tip)"
+        type: string
+        required: false
+        default: ""
+
+jobs:
+  build-rtwo:
+    name: rtwo lineage-23.2 (${{ inputs.feature_set }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v7
+
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+          rm_cmd: "rmz"
+          rmz_version: "3.1.1"
+          testing: false
+
+      - name: Setup Build Environment
+        uses: ./.github/actions/setup-build-environment
+        with:
+          version: ${{ env.WILDKERNEL_VERSION }}
+          sublevel: rtwo
+        env:
+          BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
+
+      - name: Clone Moto rtwo Kernel Source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${{ github.workspace }}/kernel/common"
+          git clone --depth=1 --branch "${KERNEL_BRANCH}" "${KERNEL_REPO}" "${{ github.workspace }}/kernel/common"
+          git -C "${{ github.workspace }}/kernel/common" log -1 --oneline
+
+      - name: Set Build Timestamp from Kernel Commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMMIT_EPOCH=$(git -C "${{ github.workspace }}/kernel/common" log -1 --format=%ct)
+          echo "SOURCE_DATE_EPOCH=${COMMIT_EPOCH}" >> "$GITHUB_ENV"
+          echo "KBUILD_BUILD_TIMESTAMP=$(date -u -d @${COMMIT_EPOCH} '+%a %b %d %H:%M:%S UTC %Y')" >> "$GITHUB_ENV"
+          echo "GIT_COMMITTER_DATE=$(date -u -d @${COMMIT_EPOCH} '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+          echo "GIT_AUTHOR_DATE=$(date -u -d @${COMMIT_EPOCH} '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_ENV"
+
+      - name: Setup KernelSU-Next
+        if: contains(inputs.feature_set, 'KSUN')
+        uses: ./.github/actions/kernelsu
+        with:
+          ksu_branch: ${{ inputs.ksu_branch }}
+
+      - name: SUSFS
+        if: contains(inputs.feature_set, 'SUSFS')
+        uses: ./.github/actions/susfs
+        with:
+          susfs_commit: ${{ inputs.susfs_commit }}
+          version: ${{ env.WILDKERNEL_VERSION }}
+          android_version: ${{ env.ANDROID_VERSION }}
+          kernel_version: ${{ env.KERNEL_VERSION }}
+          os_patch_level: lineage-23.2
+          sublevel: rtwo
+
+      - name: Apply Kernel Branding
+        uses: ./.github/actions/apply-kernel-branding
+        with:
+          variant: rtwo
+          kernel_version: ${{ env.KERNEL_VERSION }}
+          android_version: ${{ env.ANDROID_VERSION }}
+          version: ${{ env.WILDKERNEL_VERSION }}
+          sublevel: rtwo
+
+      - name: Build Moto rtwo Kernel Image
+        shell: bash
+        working-directory: ${{ github.workspace }}/kernel/common
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.SOURCE_DATE_EPOCH }}
+          KBUILD_BUILD_TIMESTAMP: ${{ env.KBUILD_BUILD_TIMESTAMP }}
+          GIT_COMMITTER_DATE: ${{ env.GIT_COMMITTER_DATE }}
+          GIT_AUTHOR_DATE: ${{ env.GIT_AUTHOR_DATE }}
+        run: |
+          set -euo pipefail
+          export ARCH=arm64
+          export LLVM=1
+          export LLVM_IAS=1
+          export KCFLAGS="-w"
+          export KCPPFLAGS="-w"
+          mkdir -p "${OUT_DIR}/dist"
+
+          make O="${OUT_DIR}" gki_defconfig
+          scripts/kconfig/merge_config.sh -O "${OUT_DIR}" "${OUT_DIR}/.config" \
+            arch/arm64/configs/vendor/kalama_GKI.config \
+            arch/arm64/configs/vendor/ext_config/moto-kalama.config \
+            arch/arm64/configs/vendor/ext_config/moto-kalama-gki.config \
+            arch/arm64/configs/vendor/ext_config/moto-kalama-rtwo.config
+          make O="${OUT_DIR}" olddefconfig
+          make O="${OUT_DIR}" -j"$(nproc)" "${IMAGE_NAME}"
+          cp "${OUT_DIR}/arch/arm64/boot/${IMAGE_NAME}" "${OUT_DIR}/dist/${IMAGE_NAME}"
+
+      - name: Package AnyKernel3
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp "${OUT_DIR}/dist/${IMAGE_NAME}" "${{ github.workspace }}/AnyKernel3/${IMAGE_NAME}"
+          sed -i 's/^device.name1=.*/device.name1=rtwo/' "${{ github.workspace }}/AnyKernel3/anykernel.sh" || true
+          sed -i 's/^device.name2=.*/device.name2=motorola rtwo/' "${{ github.workspace }}/AnyKernel3/anykernel.sh" || true
+          (cd "${{ github.workspace }}/AnyKernel3" && zip -r9 "${{ github.workspace }}/WildKernel-rtwo-${{ github.run_number }}.zip" .)
+
+      - name: Upload Image
+        uses: actions/upload-artifact@v7
+        with:
+          name: WildKernel-rtwo-Image
+          path: ${{ env.OUT_DIR }}/dist/${{ env.IMAGE_NAME }}
+          if-no-files-found: error
+          compression-level: 9
+
+      - name: Upload AnyKernel3 Zip
+        uses: actions/upload-artifact@v7
+        with:
+          name: WildKernel-rtwo-AnyKernel3
+          path: WildKernel-rtwo-${{ github.run_number }}.zip
+          if-no-files-found: error
+          compression-level: 9
