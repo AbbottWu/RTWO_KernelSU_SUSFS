@@ -76,11 +76,11 @@ runs:
         fi
         if [ "${{ inputs.sublevel }}" -ge "197" ]; then
           echo "Applying namespace.c Android 13 5.15 Fake Patch"
-          sed -i '/^#include <trace\/hooks\/blk.h>$/d' fs/namespace.c
+          sed -i -E '/^[[:space:]]*#[[:space:]]*include[[:space:]]+<trace\/hooks\/blk.h>[[:space:]]*$/d' fs/namespace.c
         fi
         if [ "${{ inputs.sublevel }}" -ge "197" ]; then
           echo "Applying task_mmu.c Android 13 5.15 Fake Patch"
-          sed -i '/^#include <trace\/hooks\/mm.h>$/d' fs/proc/task_mmu.c
+          sed -i -E '/^[[:space:]]*#[[:space:]]*include[[:space:]]+<trace\/hooks\/mm.h>[[:space:]]*$/d' fs/proc/task_mmu.c
         fi
 
     - name: Apply Android 14 6.1 Fake Patches
@@ -98,7 +98,7 @@ runs:
         fi
         if [ "${{ inputs.sublevel }}" -ge "157" ]; then
           echo "Applying namespace.c Android 14 6.1 Fake Patch"
-          sed -i '/^#include <trace\/hooks\/blk.h>$/d' fs/namespace.c
+          sed -i -E '/^[[:space:]]*#[[:space:]]*include[[:space:]]+<trace\/hooks\/blk.h>[[:space:]]*$/d' fs/namespace.c
         fi
 
     - name: Apply Android 15 6.6 Fake Patches
@@ -143,7 +143,24 @@ runs:
       shell: bash
       working-directory: ${{ github.workspace }}/kernel/common
       run: |
-        patch -p1 < 50_add_susfs_in_gki-${{ inputs.version }}.patch
+        if ! patch -p1 < 50_add_susfs_in_gki-${{ inputs.version }}.patch; then
+          if [[ "${{ inputs.version }}" == "android13-5.15" && "${{ inputs.sublevel }}" -ge "197" \
+                && -f fs/namespace.c.rej && -f fs/proc/task_mmu.c.rej \
+                && "$(find . -name '*.rej' -print | wc -l)" -eq 2 ]]; then
+            echo "SUSFS patch only rejected the known android13-5.15 >=197 include hunks; applying them manually"
+            if ! grep -qE '^[[:space:]]*#[[:space:]]*include[[:space:]]+<linux/susfs.h>[[:space:]]*$' fs/namespace.c; then
+              sed -i '/^#include "internal.h"$/a #include <linux/susfs.h>' fs/namespace.c
+            fi
+            if ! grep -qE '^[[:space:]]*#[[:space:]]*include[[:space:]]+<linux/susfs.h>[[:space:]]*$' fs/proc/task_mmu.c; then
+              sed -i '/^#include <linux\/pkeys.h>$/a #include <linux/susfs.h>' fs/proc/task_mmu.c
+            fi
+            rm -f fs/namespace.c.rej fs/proc/task_mmu.c.rej
+          else
+            echo "Unexpected SUSFS patch rejects:" >&2
+            find . -name '*.rej' -print >&2
+            exit 1
+          fi
+        fi
 
         # SUSFS's OPEN_REDIRECT code unconditionally calls VMA_PAD_START(), which
         # only exists on GKI branches that carry Google's page-size-migration

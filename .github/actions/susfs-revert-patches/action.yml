@@ -45,11 +45,15 @@ runs:
         fi
         if [ "${{ inputs.sublevel }}" -ge "197" ]; then
           echo "Reverting namespace.c Android 13 5.15 Fake Patch"
-          sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c
+          if ! grep -qE '^[[:space:]]*#[[:space:]]*include[[:space:]]+<trace/hooks/blk.h>[[:space:]]*$' fs/namespace.c; then
+            sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c
+          fi
         fi
         if [ "${{ inputs.sublevel }}" -ge "206" ]; then
           echo "Reverting task_mmu.c Android 13 5.15 Fake Patch"
-          sed -i '/^#include <linux\/pkeys.h>$/a #include <trace/hooks/mm.h>' fs/proc/task_mmu.c
+          if ! grep -qE '^[[:space:]]*#[[:space:]]*include[[:space:]]+<trace/hooks/mm.h>[[:space:]]*$' fs/proc/task_mmu.c; then
+            sed -i '/^#include <linux\/pkeys.h>$/a #include <trace/hooks/mm.h>' fs/proc/task_mmu.c
+          fi
         fi
 
     - name: Revert Android 14 6.1 Fake Patches
@@ -66,7 +70,9 @@ runs:
         fi
         if [ "${{ inputs.sublevel }}" -ge "157" ]; then
           echo "Reverting namespace.c Android 14 6.1 Fake Patch"
-          sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c
+          if ! grep -qE '^[[:space:]]*#[[:space:]]*include[[:space:]]+<trace/hooks/blk.h>[[:space:]]*$' fs/namespace.c; then
+            sed -i '/^#include "internal.h"$/a #include <trace/hooks/blk.h>' fs/namespace.c
+          fi
         fi
 
     - name: Revert Android 15 6.6 Fake Patches

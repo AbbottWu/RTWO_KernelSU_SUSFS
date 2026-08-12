@@ -11,6 +11,8 @@ env:
   WILDKERNEL_VERSION: android13-5.15
   OUT_DIR: /home/runner/out
   IMAGE_NAME: Image
+  KERNEL_SUBLEVEL: "208"
+  DEVICE_CODENAME: rtwo
 
 on:
   workflow_dispatch:
@@ -63,7 +65,7 @@ jobs:
         uses: ./.github/actions/setup-build-environment
         with:
           version: ${{ env.WILDKERNEL_VERSION }}
-          sublevel: rtwo
+          sublevel: ${{ env.KERNEL_SUBLEVEL }}
         env:
           BOOT_SIGN_KEY: ${{ secrets.BOOT_SIGN_KEY }}
 
@@ -100,7 +102,7 @@ jobs:
           android_version: ${{ env.ANDROID_VERSION }}
           kernel_version: ${{ env.KERNEL_VERSION }}
           os_patch_level: lineage-23.2
-          sublevel: rtwo
+          sublevel: ${{ env.KERNEL_SUBLEVEL }}
 
       - name: Apply Kernel Branding
         uses: ./.github/actions/apply-kernel-branding
@@ -109,7 +111,7 @@ jobs:
           kernel_version: ${{ env.KERNEL_VERSION }}
           android_version: ${{ env.ANDROID_VERSION }}
           version: ${{ env.WILDKERNEL_VERSION }}
-          sublevel: rtwo
+          sublevel: ${{ env.KERNEL_SUBLEVEL }}
 
       - name: Build Moto rtwo Kernel Image
         shell: bash
@@ -143,7 +145,7 @@ jobs:
         run: |
           set -euo pipefail
           cp "${OUT_DIR}/dist/${IMAGE_NAME}" "${{ github.workspace }}/AnyKernel3/${IMAGE_NAME}"
-          sed -i 's/^device.name1=.*/device.name1=rtwo/' "${{ github.workspace }}/AnyKernel3/anykernel.sh" || true
+          sed -i 's/^device.name1=.*/device.name1=${DEVICE_CODENAME}/' "${{ github.workspace }}/AnyKernel3/anykernel.sh" || true
           sed -i 's/^device.name2=.*/device.name2=motorola rtwo/' "${{ github.workspace }}/AnyKernel3/anykernel.sh" || true
           (cd "${{ github.workspace }}/AnyKernel3" && zip -r9 "${{ github.workspace }}/WildKernel-rtwo-${{ github.run_number }}.zip" .)
 
