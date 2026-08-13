@@ -61,6 +61,20 @@ jobs:
           rmz_version: "3.1.1"
           testing: false
 
+      - name: Setup more Swap (for LTO)
+        uses: thejerrybao/setup-swap-space@v1
+        with:
+          swap-size-gb: 16
+
+      - name: Show Runner Resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          nproc
+          free -h
+          swapon --show
+          df -h
+
       - name: Setup Build Environment
         uses: ./.github/actions/setup-build-environment
         with:
